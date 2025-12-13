@@ -1,11 +1,11 @@
 /* 
  * AC46 Firmware Tool.cpp : Defines the entry point for the application.
- * Version 1.0.0.0
+ * Version 1.1
  * Date 2025/11/23
  * Author 0x0-nyan
  */
 
-//#pragma warning( disable : 6031)
+
 #include "framework.h"
 #include "AC46 Firmware Tool.h"
 
@@ -33,11 +33,11 @@ INT_PTR CALLBACK    MainGUIProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 
-BOOL WINAPI JLEncCipher(BYTE* pData, u32 Offset, u32 Length, const u16 Key, HWND OPTIONAL hWnd) {
+BOOL WINAPI JLEncCipher(BYTE* pData, BOOL Mode, u32 Length, const u16 Key, HWND OPTIONAL hWnd) {
     if (!pData) return 0;
     u16 Key1 = Key;
-    for (long i = Offset; i < Length; i++) {
-        if (!(i % 32)) Key1 = Key;
+    for (long i = 0; i < Length; i++) {
+        if(!Mode) if (!(i % 32)) Key1 = Key;
         pData[i] ^= Key1 & 0xFF;
         Key1 = ((Key1 << 1) ^ (Key1 & 0x8000 ? 0x1021 : 0)) & 0xFFFF;
         if (!i % 0xFF) if (hWnd) SendMessageW(GetDlgItem(hWnd, IDC_PROGRESS1), PBM_SETPOS, (int)(((double)i / (double)Length) * 100), 0);
@@ -164,7 +164,12 @@ BOOL WINAPI CipherGUI(HWND hWnd, DWORD dwCipherMode) {
         if (hRFile) {
             Data0 = new BYTE[1048576];
             ZeroMemory(Data0, 1048576);
-            BOOL res = ReadFile(hRFile, Data0, 1048576, &cs.nBytesToProcess, NULL);
+            if (!ReadFile(hRFile, Data0, 1048576, &cs.nBytesToProcess, NULL)) {
+                MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
+                delete[] Data0;
+                CloseHandle(hRFile);
+                return 0;
+            }
             cs.pbBuffer = Data0;
             //cs.nBufferLength = BytesRead;
             cs.szInputPath = Path;
@@ -174,14 +179,10 @@ BOOL WINAPI CipherGUI(HWND hWnd, DWORD dwCipherMode) {
 			cs.szOutputPath = szOutPath;
             Sleep(500);
             CloseHandle(hRFile);
-            if (!res) {
-                MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
-                delete[] Data0;
-                return 0;
-            }
+            
 		}
         else {
-            MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
+            MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
             return 0;
         }
     }
@@ -211,12 +212,15 @@ void WINAPI ShowChipkey(HWND hWnd) {
     if (GetFileNameW(NULL, Path, sizeof(Path), L"chip_key.bin\0*.*\0\0", L"Decode Chipkey...", GFN_OPEN)) {
         HANDLE hRFile = CreateFileW(Path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NULL, NULL);
         if (hRFile) {
-            BOOL res = ReadFile(hRFile, Data0, 128, &BytesRead, NULL);
-            if(!res) MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
+            if (!ReadFile(hRFile, Data0, 128, &BytesRead, NULL)) {
+                MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
+                CloseHandle(hRFile);
+                return;
+            }
             Sleep(200);
             CloseHandle(hRFile);
         }
-        else MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
+        else MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
     }
     else MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
     u16 ChipKey = DecodeChipkey(Data0);
@@ -235,16 +239,15 @@ void WINAPI ShowCrc16(HWND hWnd) {
         if (hRFile) {
             Data0 = new BYTE[1048576];
             ZeroMemory(Data0, 1048576);
-            BOOL res = ReadFile(hRFile, Data0, 1048576, &BytesRead, NULL);
-            //Sleep(200);
-            if (!res) {
+            if (!ReadFile(hRFile, Data0, 1048576, &BytesRead, NULL)) {
                 MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
                 delete[] Data0;
+                CloseHandle(hRFile);
                 return;
             }
             CloseHandle(hRFile);
         }
-        else MessageBoxW(NULL, L"Failed to read file", NULL, MB_ICONERROR);
+        else MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
     }
     else MessageBoxW(NULL, L"Failed to open file", NULL, MB_ICONERROR);
     u16 CRC16 = crc16_ccitt(Data0, BytesRead);
@@ -296,7 +299,7 @@ DWORD WINAPI CipherThreadProc(LPVOID lpParam) {
         }
     }
     else {
-        MessageBoxW(cs.hWndDialog, L"‚Ê‚é‚Û", NULL, MB_ICONERROR);
+        MessageBoxW(cs.hWndDialog, L"ã¬ã‚‹ã½", NULL, MB_ICONERROR);
     }
     EnableWindow(GetDlgItem(cs.hWndDialog, IDFINISH), TRUE);
     Sleep(5000);
@@ -330,8 +333,7 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
     if(hFile != INVALID_HANDLE_VALUE) {
         pFlash = new BYTE[1048576];
 		ZeroMemory(pFlash, 1048576);
-        BOOL res = ReadFile(hFile, pFlash, 1048576, &BytesRead, NULL);
-        if (res) {
+        if (ReadFile(hFile, pFlash, 1048576, &BytesRead, NULL)) {
             CloseHandle(hFile);
             wsprintfW(tMsg, L"\r\nFlash Image Size: %d Bytes", BytesRead);
             wcscat_s(Msg, 8192, tMsg);
@@ -345,6 +347,7 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
             SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
             SetDlgItemTextW(cs.hWndDialog, IDC_INPUTPATH, L"No file selected, drag an AC46 flash image here to open");
             MessageBeep(MB_ICONERROR);
+            delete[] pFlash;
             delete[] Msg;
             return 1;
         }
@@ -389,23 +392,23 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
 	wsprintfW(tMsg, L"\r\nFlash Header CRC: 0x%04X\r\nFile List CRC: 0x%04X\r\nFile Count: %d\r\n", FlashHeader.CRC16, FlashHeader.CRC16FileHead, FlashHeader.nFiles);
     wcscat_s(Msg, 8192, tMsg);
     SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
-    
-    // Descramble file list if scrambled
-    if (cs.dwCipherMode == CP_FW_AC46_ENCRYPTED) JLEncCipher(&pFlash[32], 0, sizeof(FILEHEAD) * FlashHeader.nFiles, 0xFFFF, NULL);
 
     // Check CRCs
     u16 ActualCRC = crc16_ccitt(&pFlash[2], 32 - 2);
     if (ActualCRC != FlashHeader.CRC16) {
-        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of flash header (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FlashHeader.CRC16);
+        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of flash header (0x%04X) doesn't match the listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FlashHeader.CRC16);
         wcscat_s(Msg, 8192, tMsg);
         SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
     }
     ActualCRC = crc16_ccitt(&pFlash[32], 32 * FlashHeader.nFiles);
     if (ActualCRC != FlashHeader.CRC16FileHead) {
-        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of file list (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FlashHeader.CRC16FileHead);
+        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of file list (0x%04X) doesn't match the listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FlashHeader.CRC16FileHead);
         wcscat_s(Msg, 8192, tMsg);
         SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
     }
+
+    // Descramble file list if scrambled
+    if (cs.dwCipherMode == CP_FW_AC46_ENCRYPTED) JLEncCipher(&pFlash[32], 0, sizeof(FILEHEAD) * FlashHeader.nFiles, 0xFFFF, NULL);
 
     // Allocate memory and read file headers
 	FileHeads = new FILEHEAD[FlashHeader.nFiles];
@@ -460,14 +463,15 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
             // Descramble it if scrambled
             if (cs.dwCipherMode == CP_FW_AC46_ENCRYPTED) {
                 wcscat_s(Msg, 8192, L"\r\nDescrambling uboot.boot ...");
-                SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
-                JLEncCipher(&pData[FileHeads[i].Address], 0, FileHeads[i].Length, 0xFFFF, NULL);
+                SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg); 
+                JLEncCipher(pData, 0, 16, 0xFFFF, NULL);                                // For first BANKCB header
+                JLEncCipher(&pData[16], 1, FileHeads[i].Length - 16, 0xFFFF, NULL);     // For code itself, with a mode 1
             }
 
             // Check CRC16
             ActualCRC = crc16_ccitt(pData, FileHeads[i].Length);
             if (ActualCRC != FileHeads[i].CRC16) {
-                wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of uboot.boot (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FileHeads[i].CRC16);
+                wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of uboot.boot (0x%04X) doesn't match the listed one (0x%04X).\r\nUsing this bootloader is not recommended.", ActualCRC, FileHeads[i].CRC16);
                 wcscat_s(Msg, 8192, tMsg);
                 SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
             }
@@ -516,28 +520,14 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
             }
 
             // Perform AC46 Cipher
-            if (JLAC46Cipher(pData, FileHeads[i].Length, NULL)) {
-                wcscat_s(Msg, 8192, L"\r\nPerforming AC46 Cipher...");
-                SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
-                wcscat_s(Msg, 8192, L"\r\nuser.app cracked successfully.");
-                SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
-            }
-            else {
-                wcscat_s(Msg, 8192, L"\r\nERROR: Failed to crack user.app. \r\nOperation Failed.");
-                SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
-                SetDlgItemTextW(cs.hWndDialog, IDC_INPUTPATH, L"No file selected, drag an AC46 flash image here to open");
-                MessageBeep(MB_ICONERROR);
-                //delete[] pFlash;
-                delete[] pData;
-                delete[] Msg;
-                delete[] FileHeads;
-                return 1;
-            }
+            wcscat_s(Msg, 8192, L"\r\nPerforming AC46 Cipher...");
+            SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
+            JLAC46Cipher(pData, FileHeads[i].Length, NULL);
 
             // Check CRC16
             ActualCRC = crc16_ccitt(pData, FileHeads[i].Length);
             if (ActualCRC != FileHeads[i].CRC16) {
-                wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of user.app (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FileHeads[i].CRC16);
+                wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of user.app (0x%04X) doesn't match the listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, FileHeads[i].CRC16);
                 wcscat_s(Msg, 8192, tMsg);
                 SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
             }
@@ -581,13 +571,13 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
     // Check CRCs of headers
     ActualCRC = crc16_ccitt(&pData[resOffset + 2], 30);
     if (ActualCRC != ResHeader.CRC16) {
-        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of resource header (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, ResHeader.CRC16);
+        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of resource header (0x%04X) doesn't match the listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, ResHeader.CRC16);
         wcscat_s(Msg, 8192, tMsg);
         SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
     }
     ActualCRC = crc16_ccitt(&pData[resOffset + 32], 32 * ResHeader.nFiles);
     if (ActualCRC != ResHeader.CRC16FileHead) {
-        wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of resoruce file list (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", ActualCRC, ResHeader.CRC16FileHead);
+        wsprintfW(tMsg, L"\r\nINFO: Actual CRC16 of resource file list (0x%04X) doesn't match the listed one (0x%04X).\r\nThis problem is still being investigated.", ActualCRC, ResHeader.CRC16FileHead);
         wcscat_s(Msg, 8192, tMsg);
         SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
     }
@@ -652,7 +642,7 @@ DWORD WINAPI AC46FWUnpackProc(LPVOID lpParam) {
         // Check CRC16
 		ActualCRC = crc16_ccitt(&pData[ResFileHeads[i].Address - ExtraOffset], ResFileHeads[i].Length);
         if (ActualCRC != ResFileHeads[i].CRC16) {
-            wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of file %s (0x%04X) doesn't match to listed one (0x%04X).\r\nThere might be some data corruption.", GetWChar16(ResFileHeads[i].Name), ActualCRC, ResFileHeads[i].CRC16);
+            wsprintfW(tMsg, L"\r\nWARNING: Actual CRC16 of file %s (0x%04X) doesn't match the listed one (0x%04X).\r\nThere might be some data corruption.", GetWChar16(ResFileHeads[i].Name), ActualCRC, ResFileHeads[i].CRC16);
             wcscat_s(Msg, 8192, tMsg);
             SetDlgItemTextW(cs.hWndDialog, IDC_MESBOX, Msg);
         }
@@ -869,6 +859,9 @@ INT_PTR CALLBACK MainGUIProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
                 break;
             case ID_TOOLS_AC46CIPHER:
                 CipherGUI(hWnd, CP_AC46);
+                break;
+            case ID_TOOLS_SFCCIPHER:
+                CipherGUI(hWnd, CP_SFC);
                 break;
             case ID_TOOLS_CALCULATECRC16:
                 ShowCrc16(hWnd);
